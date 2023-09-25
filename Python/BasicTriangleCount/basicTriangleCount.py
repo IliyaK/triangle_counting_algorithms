@@ -9,7 +9,9 @@ This is a tester linear implementation, full GPU implementation will be done in 
 
 import numpy as np
 from misc import adjacency_matrix_converter
+import sys
 
+import pycuda
 
 def preprocessing(path_to_file):
     """
@@ -44,12 +46,30 @@ def basic_triangle_count(matrix_a):
     :return:
     """
     count = 0
-
-    # split matrix_a into matrix_L and matrix_U
+    n, m = matrix_a.shape
+    # making diagonal masks to split matrix into upper and lower section
+    matrix_L_mask = np.tril(np.ones((n,m), dtype=bool), k=-1)
+    matrix_U_mask = np.tril(np.ones((n,m), dtype=bool), k=1)
+    # splitting input matrix into upper and lower sections
+    matrix_L = np.where(matrix_L_mask, matrix_a, 0)
+    matrix_U = np.where(matrix_U_mask, matrix_a, 0)
+    # in this case 10 is the number of threads,
+    # the loop spawns new thread and sections off the appropriate part of the matrix for calculation
+    for i in range(10):
+        row_sum_u = np.sum()
     """
     for each thread do:
         sum rum all of the rows in matrix_U
-        j = NzIndices
+        Urowsum = SUM(Ui, rows)     # what I think is happening is that we are pulling rows from Ui and summing them
+        j = NzIndices(Urowsum)
+        JS = MPI_ALLGATHERV(J)
+        for j in range(p):
+            LSpack[j] = SpRef(Li, :, JS(j))
+        LSrecv = MPI_ALLTOALL(LSpack)
+        Lrecv = concat LSresv
+        B = SpGEMM(Lrecv, Ui)
+        Ci = matrix_a * B
+        loclcnt = SUM(SUM(Ci, cols), rows)      # summing the entire matrix
     """
     return count
 
@@ -81,4 +101,9 @@ def concatenate():
 
 
 if __name__ == '__main__':
-    preprocessing("./data.txt")
+    res = preprocessing("./data.txt")
+    if res:
+        basic_triangle_count(res)
+    else:
+        print("Could not complete basic_triangle_count()", file=sys.stderr)
+        exit(1)
