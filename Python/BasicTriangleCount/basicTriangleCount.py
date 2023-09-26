@@ -54,26 +54,27 @@ def basic_triangle_count(matrix_a):
     matrix_L_mask = np.tril(np.ones((n,m), dtype=bool), k=-1)
     matrix_U_mask = np.tril(np.ones((n,m), dtype=bool), k=1)
     # splitting input matrix into upper and lower sections
-    matrix_L = np.where(matrix_L_mask, matrix_a, 0)
-    matrix_U = np.where(matrix_U_mask, matrix_a, 0)
-    matrix_U = matrix_U.astype(np.int32)
-    matrix_L = matrix_L.astype(np.int32)
+    matrix_L = np.where(matrix_L_mask, matrix_a, 0).astype(np.int32)
+    matrix_U = np.where(matrix_U_mask, matrix_a, 0).astype(np.int32)
+    del matrix_L_mask, matrix_U_mask, n, m
 
     ######## pyCUDA #############
     mod = SourceModule("""
-    __global__ void sum_rows(int *dest, int *a, int num_rows, int num_cols)
+    __global__ void nzindices(int *dest, int *u, int num_rows, int num_cols)
     {
       const int i = blockIdx.x * blockDim.x + threadIdx.x;
       if (i < num_rows) {
         int row_sum = 0;
         for (int j = 0; j < num_cols; j++) {
-          row_sum += a[i * num_cols + j];
+          row_sum += u[i * num_cols + j];
         }
-        dest[i] = row_sum;
+        if (row_sum != 0){
+            dest[i] = 1;
+        }
       }
     }
     """)
-    sum_rows = mod.get_function("sum_rows")
+    sum_rows = mod.get_function("nzindices")
     num_rows, num_cols = matrix_U.shape
 
     dest = np.zeros((num_rows,), dtype=np.int32)
@@ -81,15 +82,85 @@ def basic_triangle_count(matrix_a):
     block_size = 400
     grid_size = (num_rows + block_size - 1) // block_size
 
-    # this accomplishes line 3 of the BasicTriangleCounting(A)
+    # this accomplishes line 3-5 of the BasicTriangleCounting(A)
     sum_rows(
         drv.Out(dest), drv.In(matrix_U), np.int32(num_rows), np.int32(num_cols),
         block=(block_size, 1, 1), grid=(grid_size, 1))
     ######### pyCUDA end
-    # this accomplishes line 4 and 5
-    non_zero_mask = dest != 0
-    non_zero_indices = np.where(non_zero_mask)
+    j = np.where(dest == 1)[0]
+    j = j.astype(np.int32)
 
+    ######## pyCUDA
+    mod = SourceModule("""
+    __global__ void extractRows(float* input_matrix, int* row_indices, float* output_matrix, int num_rows, int num_cols) {
+        const int x = blockIdx.x * blockDim.x + threadIdx.x;
+        if (x < num_cols){
+            for(int i = 0; i<num_rows;i++){
+                output_matrix[x+num_cols*i] = input_matrix[row_indices[x]*num_rows + i];
+            }
+        }
+    }
+    """)
+    # num_rows = matrix_U.shape[0]
+    num_cols = len(j)
+
+    dest = np.zeros((matrix_U.shape[1], num_cols), dtype=np.int32)
+
+    block_size = 10
+    grid_size = (num_cols + block_size - 1) // block_size
+    extractColumns = mod.get_function("extractRows")
+
+    extractColumns(drv.In(matrix_U), drv.In(j), drv.Out(dest), np.int32(matrix_U.shape[1]), np.int32(num_cols),
+                   block=(block_size, 1, 1), grid=(grid_size, 1))
+
+    matrix_U = dest
+    ######## pyCUDA end
+
+    # matrix_U = matrix_U[j, :].T
+    ####### pyCUDA
+    # pulling columns
+    mod = SourceModule("""
+    __global__ void extractColumns(int* input_matrix, int* row_indices, int* output_matrix, int num_rows) {
+        const int x = blockIdx.x * blockDim.x + threadIdx.x;
+        if (x < num_rows){
+            for (int i = 0; i<num_rows; i++){
+                    output_matrix[x*num_rows + i] = input_matrix[row_indices[x] + i*num_rows];
+            }
+        }
+    }
+    """)
+    num_rows = matrix_L.shape[0]
+    num_cols = len(j)
+
+    dest = np.zeros((num_cols, matrix_L.shape[1]), dtype=np.int32)
+
+    block_size = 10
+    grid_size = (num_cols + block_size - 1) // block_size
+    extractColumns = mod.get_function("extractColumns")
+
+    extractColumns(drv.In(matrix_L), drv.In(j), drv.Out(dest), np.int32(num_rows),
+                   block=(block_size, 1, 1), grid=(grid_size, 1))
+
+    Lrecv = dest
+    print(Lrecv.shape)
+    print(matrix_U.shape)
+    ######## pyCUDA
+    # dot product on vectors
+
+
+    ######## pyCUDA end
+
+    return
+    B = np.dot(matrix_U, Lrecv)  # assuming that the proper way is to parse each as a vector of shape 1x4039 . 4039x1 resulting in 4039 ints which are then multiplies by input matrix which is then summed
+    print(B.shape)
+    Ci = matrix_a * B
+    print(Ci.shape)
+    print(np.sum(Ci))
+    """
+    1612010
+    1613150
+    """
+    ####### pyCUDA end
     """
     for each thread do:
         sum rum all of the rows in matrix_U
@@ -101,37 +172,12 @@ def basic_triangle_count(matrix_a):
             LSpack[j] = SpRef(Li, :, JS(j))
         LSrecv = MPI_ALLTOALL(LSpack)
         Lrecv = concat LSresv
-        B = SpGEMM(Lrecv, Ui)
-        Ci = matrix_a * B
+        B = SpGEMM(Lrecv, Ui)   # basically Lrecv . Ui
+        Ci = matrix_a . B
         loclcnt = SUM(SUM(Ci, cols), rows)      # summing the entire matrix
     """
     return count
 
-
-def mask():
-    return
-
-
-def spgemm():
-    return
-
-
-def nzincides():
-    return
-
-
-def mpi_allgatherv():
-    return
-
-
-def lspack():
-    return
-
-def spref():
-    return
-
-def concatenate():
-    return
 
 
 if __name__ == '__main__':
