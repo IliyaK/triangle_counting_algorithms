@@ -39,12 +39,8 @@ def preprocessing(path_to_file):
         return False
 
 
-# this algorithm in heavily based on 1D SpGEMM (Sparse General Matrix-Matrix Multiplication)
 def basic_triangle_count(matrix_a):
     """
-    The Triangle-basic algorithm
-    performs a distributed SpGEMM to compute L · U, where the
-    ith processor sends all rows
     :param matrix_a: Adjacency Matrix (ndarray)
     :return:
     """
@@ -101,7 +97,6 @@ def basic_triangle_count(matrix_a):
         }
     }
     """)
-    # num_rows = matrix_U.shape[0]
     num_cols = len(j)
 
     dest = np.zeros((matrix_U.shape[1], num_cols), dtype=np.int32)
@@ -113,10 +108,9 @@ def basic_triangle_count(matrix_a):
     extractColumns(drv.In(matrix_U), drv.In(j), drv.Out(dest), np.int32(matrix_U.shape[1]), np.int32(num_cols),
                    block=(block_size, 1, 1), grid=(grid_size, 1))
 
-    matrix_U = dest
+    matrix_U = dest.astype(np.int32)
     ######## pyCUDA end
 
-    # matrix_U = matrix_U[j, :].T
     ####### pyCUDA
     # pulling columns
     mod = SourceModule("""
@@ -141,49 +135,100 @@ def basic_triangle_count(matrix_a):
     extractColumns(drv.In(matrix_L), drv.In(j), drv.Out(dest), np.int32(num_rows),
                    block=(block_size, 1, 1), grid=(grid_size, 1))
 
-    Lrecv = dest
-    print(Lrecv.shape)
-    print(matrix_U.shape)
+    Lrecv = dest.astype(np.int32)
     ######## pyCUDA
     # dot product on vectors
-
-
+    mod = SourceModule("""
+    __global__ void matrix_multiply(int *L, int *U, int *output, int rows_L, int cols_L, int cols_U) {
+        int row = threadIdx.y + blockIdx.y * blockDim.y;
+        int col = threadIdx.x + blockIdx.x * blockDim.x;
+    
+        if (row < rows_L && col < cols_U) {
+            int sum = 0;
+            for (int k = 0; k < cols_L; k++) {
+                sum += L[row * cols_L + k] * U[k * cols_U + col];
+            }
+            output[row * cols_U + col] = sum;
+        }
+    }
+    """)
+    rows_L, cols_L = matrix_U.shape
+    rows_U, cols_U = Lrecv.shape
+    output_matrix = np.zeros((rows_L, cols_U), dtype=np.int32)
+    matrix_multiply_gpu = mod.get_function("matrix_multiply")
+    block_dim = (16, 16, 1)
+    grid_dim = (int(np.ceil(cols_U / block_dim[0])), int(np.ceil(rows_L / block_dim[1])), 1)
+    matrix_multiply_gpu(drv.In(matrix_U), drv.In(Lrecv), drv.Out(output_matrix),
+                        np.int32(rows_L), np.int32(cols_L), np.int32(cols_U),
+                        block=block_dim, grid=grid_dim)
+    B = output_matrix
     ######## pyCUDA end
+    ######## pyCUDA
+    mod = SourceModule("""
+    __global__ void elementwise_multiply(int *A, int *B, int n) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int idy = threadIdx.y + blockIdx.y * blockDim.y;
+        int index = idx + idy * n;
+            
+        if (idx < n && idy < n) {
+            A[index] *= B[index];
+        }
+    }
+    """)
+    n = matrix_a.shape[0]
+    matrix_a = matrix_a.astype(np.int32)
+    B = B.astype(np.int32)
+    block_dim = (16, 16, 1)
+    grid_dim = (n // block_dim[0] + 1, n // block_dim[1] + 1, 1)
+    matrix_a_gpu = drv.mem_alloc(matrix_a.nbytes)
+    matrix_B_gpu = drv.mem_alloc(B.nbytes)
 
-    return
-    B = np.dot(matrix_U, Lrecv)  # assuming that the proper way is to parse each as a vector of shape 1x4039 . 4039x1 resulting in 4039 ints which are then multiplies by input matrix which is then summed
-    print(B.shape)
-    Ci = matrix_a * B
-    print(Ci.shape)
-    print(np.sum(Ci))
-    """
-    1612010
-    1613150
-    """
-    ####### pyCUDA end
-    """
-    for each thread do:
-        sum rum all of the rows in matrix_U
-        Urowsum = SUM(Ui, rows)     # pulling rows from Ui and summing them, returning list
-        J = NzIndices(Urowsum)  # seeing which rows have non-zero sums, returning their index
-        # MPI_ means function requires communication
-        JS = MPI_ALLGATHERV(J) # getting all of the J rows?
-        for j in range(p):
-            LSpack[j] = SpRef(Li, :, JS(j))
-        LSrecv = MPI_ALLTOALL(LSpack)
-        Lrecv = concat LSresv
-        B = SpGEMM(Lrecv, Ui)   # basically Lrecv . Ui
-        Ci = matrix_a . B
-        loclcnt = SUM(SUM(Ci, cols), rows)      # summing the entire matrix
-    """
+    # Transfer the matrices from CPU to GPU
+    drv.memcpy_htod(matrix_a_gpu, matrix_a)
+    drv.memcpy_htod(matrix_B_gpu, B)
+    matrix_multiply_gpu = mod.get_function("elementwise_multiply")
+
+    matrix_multiply_gpu(matrix_a_gpu, matrix_B_gpu, np.int32(n), block=block_dim, grid=grid_dim)
+    drv.memcpy_dtoh(matrix_a, matrix_a_gpu)
+    ######## pyCUDA end
+    matrix_a = matrix_a.astype(np.int32)
+    ####### pyCuda
+    mod = SourceModule("""
+    __global__ void row_sum(int *matrix, int *row_sums, int n) {
+        int idx = threadIdx.x + blockIdx.x * blockDim.x;
+        int idy = threadIdx.y + blockIdx.y * blockDim.y;
+        int index = idx + idy * n;
+        
+        if (idx < n && idy < n) {
+            int value = matrix[index];
+            atomicAdd(&row_sums[idx], value);
+        }
+    }
+    """)
+    row_sum_kernel = mod.get_function("row_sum")
+    matrix_gpu = drv.mem_alloc(matrix_a.nbytes)
+    drv.memcpy_htod(matrix_gpu, matrix_a)
+    row_sums_gpu = drv.mem_alloc(matrix_a.shape[0] * matrix_a.itemsize)
+    row_sums = np.zeros(matrix_a.shape[0], dtype=np.int32)
+    drv.memcpy_htod(row_sums_gpu, row_sums)
+    block_dim = (16, 16, 1)
+    grid_dim = (matrix_a.shape[0] // block_dim[0] + 1, matrix_a.shape[0] // block_dim[1] + 1, 1)
+    row_sum_kernel(matrix_gpu, row_sums_gpu, np.int32(n), block=block_dim, grid=grid_dim)
+    drv.memcpy_dtoh(row_sums, row_sums_gpu)
+    count = sum(row_sums)
+    ####### pyCuda end
+
     return count
 
 
 
 if __name__ == '__main__':
-    res = preprocessing("../../graphs/facebook_combined.txt")
+    # res = preprocessing("../../graphs/facebook_combined.txt")
+    res = preprocessing("../../graphs/CA-HepPh.txt")
     if type(res) == np.ndarray:
-        basic_triangle_count(res)
+        count = basic_triangle_count(res)
+        # print(f"count: {count}\t\treal count: 1612010\t\tdif.: {count-1612010}")
+        print(f"count: {count}\t\treal count: 3358499\t\tdif.: {count-3358499}")
     else:
         print("Could not complete basic_triangle_count()", file=sys.stderr)
         exit(1)
