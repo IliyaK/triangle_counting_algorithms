@@ -40,7 +40,7 @@ int getNumberOfVertices(const std::vector<std::pair<int, int>>& edgeList) {
     for (const auto& edge : edgeList) {
         numVertices = std::max(numVertices, std::max(edge.first, edge.second));
     }
-    return numVertices + 1;
+    return numVertices;
 }
 
 void edgeListToCSC(const std::vector<std::pair<int, int>>& edgeList,

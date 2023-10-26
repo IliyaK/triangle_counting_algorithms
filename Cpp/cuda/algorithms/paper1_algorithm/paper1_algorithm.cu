@@ -1,5 +1,13 @@
 #include "../../preprocessing.h"  // to get CSCMatrix struct
 
+__global__ void countEdgesInRowKernel(const int* colPtr, int numVertices, int* result) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < numVertices) {
+        result[row] = colPtr[row + 1] - colPtr[row];
+    }
+}
+
 void countEdgesInRowsCUDA(const CSCMatrix& CSC, int numVertices, int* result) {
     int* d_colPtr;
     int* d_result;
@@ -25,14 +33,19 @@ void countEdgesInRowsCUDA(const CSCMatrix& CSC, int numVertices, int* result) {
     cudaFree(d_colPtr);
     cudaFree(d_result);
 }
-__global__ void countEdgesInRowKernel(const int* colPtr, int numVertices, int* result) {
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row < numVertices) {
-        result[row] = colPtr[row + 1] - colPtr[row];
+__global__ void nzindices(int *dest, const int *u, int num_rows, int num_cols)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < num_rows) {
+        if (u[i] != 0) {
+            dest[i] = 1;
+        }
+        else{
+            dest[i] = 0;
+        }
     }
 }
-
 void NonZeroIndices(int numVertices, int* uRowSum, int* uNonZero) {
     int* d_uRowSum;
     int* d_uNonZero;
@@ -60,16 +73,4 @@ void NonZeroIndices(int numVertices, int* uRowSum, int* uNonZero) {
     // Free allocated memory on the device
     cudaFree(d_uRowSum);
     cudaFree(d_uNonZero);
-}
-__global__ void nzindices(int *dest, const int *u, int num_rows, int num_cols)
-{
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < num_rows) {
-        if (u[i] != 0) {
-            dest[i] = 1;
-        }
-        else{
-            dest[i] = 0;
-        }
-    }
 }
