@@ -1,6 +1,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <iostream>
 
 #ifndef CPP_PREPROCESSING_H

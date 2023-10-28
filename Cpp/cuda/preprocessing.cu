@@ -15,6 +15,9 @@ std::vector<std::pair<int, int>> edgeLine_parser(const std::string& file_name){
 
         // parsing graph file into edge line format
         while(std::getline(inputFile, line)){
+            if (line.empty()){
+                continue;
+            }
             found = line.find(' ');
             if (found != std::string::npos){
                 for(int i=0; i<found; i++){
@@ -40,7 +43,7 @@ int getNumberOfVertices(const std::vector<std::pair<int, int>>& edgeList) {
     for (const auto& edge : edgeList) {
         numVertices = std::max(numVertices, std::max(edge.first, edge.second));
     }
-    return numVertices;
+    return numVertices+1;
 }
 
 void edgeListToCSC(const std::vector<std::pair<int, int>>& edgeList,

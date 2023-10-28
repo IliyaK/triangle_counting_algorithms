@@ -4,201 +4,248 @@
 #include "algorithms/paper1_algorithm/paper1_algorithm.h"
 
 
-// TODO: ALL OF THESE FUNCTIONS ARE TESTS FOR ADJACENCY MATRIX
 struct adjacency_matrix{
     std::vector<std::vector<float>> matrix;
 };
 
 
-// Function to convert an edge list to an adjacency matrix
-adjacency_matrix edgeListToAdjacencyMatrix(const std::vector<std::pair<int, int>>& edgeList) {
-    int n = 0;
-    for (const auto& edge : edgeList) {
-        n = std::max(n, std::max(edge.first, edge.second));
-    }
-    n++;
+// CUDA kernel to copy upper and lower triangular elements
+__global__ void copyUpperLower(int* mat, int* upper, int* lower, int numVertices_edgeList) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    adjacency_matrix adjMatrix;
-    adjMatrix.matrix.resize(n, std::vector<float>(n, 0.0f));
-
-    for (const auto& edge : edgeList) {
-        adjMatrix.matrix[edge.first][edge.second] = 1;
-        adjMatrix.matrix[edge.second][edge.first] = 1; // If the graph is undirected
-    }
-
-    return adjMatrix;
-}
-
-// Function to split an adjacency matrix into upper and lower parts
-std::pair<adjacency_matrix, adjacency_matrix> splitAdjacencyMatrix(const adjacency_matrix& adjMatrix) {
-    int n = adjMatrix.matrix.size();
-
-    adjacency_matrix upperMatrix;
-    upperMatrix.matrix.resize(n, std::vector<float>(n, 0.0f));
-
-    adjacency_matrix lowerMatrix;
-    lowerMatrix.matrix.resize(n, std::vector<float>(n, 0.0f));
-
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            if (i <= j) {
-                upperMatrix.matrix[i][j] = adjMatrix.matrix[i][j];
-            }
-            if (i >= j) {
-                lowerMatrix.matrix[i][j] = adjMatrix.matrix[i][j];
-            }
+    if (i < numVertices_edgeList && j < numVertices_edgeList) {
+        if (i <= j) {
+            upper[i * numVertices_edgeList + j] = mat[i * numVertices_edgeList + j];
+            lower[j * numVertices_edgeList + i] = mat[i * numVertices_edgeList + j];
         }
     }
-
-    return std::make_pair(upperMatrix, lowerMatrix);
-}
-
-// Function to multiply the upper and lower parts of an adjacency matrix
-adjacency_matrix multiplyUpperLower(const adjacency_matrix& upperMatrix, const adjacency_matrix& lowerMatrix) {
-    int n = upperMatrix.matrix.size();
-
-    adjacency_matrix productMatrix;
-    productMatrix.matrix.resize(n, std::vector<float>(n, 0.0f));
-
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            for (int k = 0; k < n; ++k) {
-                productMatrix.matrix[i][j] += upperMatrix.matrix[i][k] * lowerMatrix.matrix[k][j];
-            }
-        }
-    }
-
-    return productMatrix;
 }
 
 
-/////////////////////////////////////////////////
-// CUDA parts
-// CUDA kernel for matrix multiplication
-//__global__ void matrixMultiplication(int n, float* upper, float* lower, float* result) {
-//    int row = blockIdx.y * blockDim.y + threadIdx.y;
-//    int col = blockIdx.x * blockDim.x + threadIdx.x;
-//    float sum = 0.0f;
-//
-//    if (row < n && col < n) {
-//        for (int k = 0; k < n; ++k) {
-//            sum += upper[row * n + k] * lower[k * n + col];
-//        }
-//        result[row * n + col] = sum;
-//    }
-//}
-//
-//void multiplyUpperLower(const adjacency_matrix& upperMatrix, const adjacency_matrix& lowerMatrix, adjacency_matrix& productMatrix) {
-//    int n = upperMatrix.matrix.size();
-//
-//    productMatrix.matrix.resize(n, std::vector<float>(n, 0.0f));
-//
-//    float* d_upperMatrix;
-//    float* d_lowerMatrix;
-//    float* d_productMatrix;
-//
-//    // Allocate memory on the GPU
-//    cudaMalloc((void**)&d_upperMatrix, n * n * sizeof(float));
-//    cudaMalloc((void**)&d_lowerMatrix, n * n * sizeof(float));
-//    cudaMalloc((void**)&d_productMatrix, n * n * sizeof(float));
-//
-//    // Copy data from CPU to GPU
-//    cudaMemcpy(d_upperMatrix, &upperMatrix.matrix[0][0], n * n * sizeof(float), cudaMemcpyHostToDevice);
-//    cudaMemcpy(d_lowerMatrix, &lowerMatrix.matrix[0][0], n * n * sizeof(float), cudaMemcpyHostToDevice);
-//
-//    // Calculate threadsPerBlock and numBlocks based on matrix dimensions
-//    int maxThreadsPerBlock = 1024; // This is a common maximum for most GPUs
-//    dim3 threadsPerBlock(maxThreadsPerBlock, 1);
-//    dim3 numBlocks((n + maxThreadsPerBlock - 1) / maxThreadsPerBlock, n);
-//
-//    // Launch the CUDA kernel
-//    matrixMultiplication<<<numBlocks, threadsPerBlock>>>(n, d_upperMatrix, d_lowerMatrix, d_productMatrix);
-//
-//    // Copy the result from GPU to CPU
-//    cudaMemcpy(&productMatrix.matrix[0][0], d_productMatrix, n * n * sizeof(float), cudaMemcpyDeviceToHost);
-//
-//    // Free GPU memory
-//    cudaFree(d_upperMatrix);
-//    cudaFree(d_lowerMatrix);
-//    cudaFree(d_productMatrix);
-//}
+__global__ void matrixMultiplication(int* product, int* upper, int* lower, int numVertices_edgeList) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-/////////////////////////////////////////////////
-
-// Function to perform element-wise matrix multiplication
-adjacency_matrix elementWiseMatrixMultiplication(const adjacency_matrix& matrix1, const adjacency_matrix& matrix2) {
-    int numRows = matrix1.matrix.size();
-    int numCols = matrix1.matrix[0].size();
-
-    adjacency_matrix resultMatrix;
-    resultMatrix.matrix.resize(numRows, std::vector<float>(numCols, 0.0f));
-
-    for (int i = 0; i < numRows; ++i) {
-        for (int j = 0; j < numCols; ++j) {
-            resultMatrix.matrix[i][j] = matrix1.matrix[i][j] * matrix2.matrix[i][j];
-        }
-    }
-
-    return resultMatrix;
-}
-
-// Function to calculate the sum of elements in an adjacency matrix
-int sumAdjacencyMatrix(const adjacency_matrix& adjMatrix) {
     int sum = 0;
-    for (const auto& row : adjMatrix.matrix) {
-        for (int val : row) {
-            sum += val;
-        }
+    for (int k = 0; k < numVertices_edgeList; ++k) {
+        sum += upper[i * numVertices_edgeList + k] * lower[k * numVertices_edgeList + j];
     }
-    return sum;
+    product[i * numVertices_edgeList + j] = sum;
 }
+
+
+// CUDA kernel to perform element-wise multiplication of mat and product
+__global__ void matrixElementWiseMultiply(int* mat, int* product, int* result, int numVertices_edgeList) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i < numVertices_edgeList && j < numVertices_edgeList) {
+        result[i * numVertices_edgeList + j] = mat[i * numVertices_edgeList + j] * product[i * numVertices_edgeList + j];
+    }
+}
+
+
+// CUDA kernel to compute the sum of elements in the result matrix
+__global__ void sumResultMatrix(int* result, int* sum, int numVertices_edgeList) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i < numVertices_edgeList && j < numVertices_edgeList) {
+        atomicAdd(sum, result[i * numVertices_edgeList + j]);
+    }
+}
+
+
 
 
 
 int main() {
     // stores graph transitions in edge list representation
-    std::vector<std::pair<int, int>> edgeList = {{1,2}, {1,7}, {7,2},
-                                                 {2,6}, {7,6}, {7,5},
-                                                 {2,3}, {5,3}, {5,4},
-                                                 {3,4}};
-//    std::vector<std::pair<int, int>> edgeList = edgeLine_parser("../graphs/facebook_combined.txt");
+//    std::vector<std::pair<int, int>> edgeList = {{1,2}, {1,7}, {7,2},
+//                                                 {2,6}, {7,6}, {7,5},
+//                                                 {2,3}, {5,3}, {5,4},
+//                                                 {3,4}};
+    std::vector<std::pair<int, int>> edgeList = edgeLine_parser("../graphs/facebook_combined.txt");
 
     int numVertices_edgeList = getNumberOfVertices(edgeList);
-//    std::cout<<numVertices_edgeList<<std::endl;
+
+
+    int sum = 0;
+
+    int size = numVertices_edgeList * numVertices_edgeList * sizeof(int);
+    std::size_t arr_size = numVertices_edgeList * numVertices_edgeList;
+    int *mat = new int[arr_size]();
 
     // making adjacency matrix
-    adjacency_matrix main_matrix = edgeListToAdjacencyMatrix(edgeList);
+    for (const auto &edge : edgeList) {
+        int vertex1 = edge.first;
+        int vertex2 = edge.second;
 
-    std::pair<adjacency_matrix, adjacency_matrix> upperLowerMatrices = splitAdjacencyMatrix(main_matrix);
-//
-    adjacency_matrix upperMatrix = upperLowerMatrices.first;
-    adjacency_matrix lowerMatrix = upperLowerMatrices.second;
-//    adjacency_matrix productMatrix;
-//
-    adjacency_matrix productMatrix = multiplyUpperLower(upperMatrix, lowerMatrix);
-//    multiplyUpperLower(upperMatrix, lowerMatrix, productMatrix);
-    adjacency_matrix resultMatrix = elementWiseMatrixMultiplication(main_matrix, productMatrix);
-    int final = sumAdjacencyMatrix(resultMatrix);
-    std::cout<< final/2 <<std::endl;
+        // Set the elements to 1 to indicate the presence of an edge
+        mat[vertex1 * numVertices_edgeList + vertex2] = 1;
+        mat[vertex2 * numVertices_edgeList + vertex1] = 1;
+    }
+    std::cout << "graph parsed" << std::endl;
+
+    int *upper = new int[arr_size]();
+    int *lower = new int[arr_size]();
+
+    // splitting into upper and lower
+
+    // Allocate device memory for mat, upper, and lower
+    int* d_mat;
+    int* d_upper;
+    int* d_lower;
+
+    cudaMalloc((void**)&d_mat, size);
+    cudaMalloc((void**)&d_upper, size);
+    cudaMalloc((void**)&d_lower, size);
+
+    // Copy data from host to device
+    cudaMemcpy(d_mat, mat, size, cudaMemcpyHostToDevice);
+
+    // Define grid and block dimensions for the CUDA kernel
+    dim3 dimGrid4((numVertices_edgeList + 15) / 16, (numVertices_edgeList + 15) / 16);
+    dim3 dimBlock4(16, 16);
+
+    // Launch the CUDA kernel to copy upper and lower triangular elements
+    copyUpperLower<<<dimGrid4, dimBlock4>>>(d_mat, d_upper, d_lower, numVertices_edgeList);
+
+    // Copy the results back from device to host if needed
+    cudaMemcpy(upper, d_upper, size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(lower, d_lower, size, cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(d_mat);
+    cudaFree(d_upper);
+    cudaFree(d_lower);
+
+//    for (int i = 0; i < numVertices_edgeList; i++) {
+//        for (int j = 0; j < numVertices_edgeList; j++) {
+//            if (i <= j) {
+//                upper[i * numVertices_edgeList + j] = mat[i * numVertices_edgeList + j];
+//                lower[j * numVertices_edgeList + i] = mat[i * numVertices_edgeList + j];
+//            }
+//        }
+//    }
+
+    int *product = new int[arr_size]();
+
+
+    // multiply upper and lower
+    int *d_product;
+
+    // Allocate memory on the GPU
+    cudaMalloc((void**)&d_product, size);
+    cudaMalloc((void**)&d_upper, size);
+    cudaMalloc((void**)&d_lower, size);
+
+    // Copy data from host to device
+    cudaMemcpy(d_upper, upper, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_lower, lower, size, cudaMemcpyHostToDevice);
+
+    // Define grid and block dimensions
+    dim3 dimGrid(numVertices_edgeList, numVertices_edgeList);
+    dim3 dimBlock(1, 1); // Adjust the block size as needed
+
+    // Launch the CUDA kernel
+    matrixMultiplication<<<dimGrid, dimBlock>>>(d_product, d_upper, d_lower, numVertices_edgeList);
+
+    // Copy the result back to the host
+    cudaMemcpy(product, d_product, size, cudaMemcpyDeviceToHost);
+
+    // Free GPU memory
+    cudaFree(d_product);
+    cudaFree(d_upper);
+    cudaFree(d_lower);
+    // multiplying upper and lower
+//    for (int i = 0; i < numVertices_edgeList; ++i) {
+//        for (int j = 0; j < numVertices_edgeList; ++j) {
+//            for (int k = 0; k < numVertices_edgeList; ++k) {
+//                product[i * numVertices_edgeList + j] += upper[i * numVertices_edgeList + k] * lower[k * numVertices_edgeList + j];
+//            }
+//        }
+//    }
+    delete[] upper;
+    delete[] lower;
+
+    int *result = new int[arr_size]();
+
+    int* d_result;
+
+    cudaMalloc((void**)&d_mat, size);
+    cudaMalloc((void**)&d_product, size);
+    cudaMalloc((void**)&d_result, size);
+
+    // Copy data from host to device
+    cudaMemcpy(d_mat, mat, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_product, product, size, cudaMemcpyHostToDevice);
+
+    // Define grid and block dimensions for the CUDA kernel
+    dim3 dimGrid2((numVertices_edgeList + 15) / 16, (numVertices_edgeList + 15) / 16);
+    dim3 dimBlock2(16, 16);
+
+    // Launch the CUDA kernel
+    matrixElementWiseMultiply<<<dimGrid2, dimBlock2>>>(d_mat, d_product, d_result, numVertices_edgeList);
+
+    // Copy the result back from device to host
+    cudaMemcpy(result, d_result, size, cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(d_mat);
+    cudaFree(d_product);
+    cudaFree(d_result);
+
+    // element wise multiplication of mat and product
+//    for (int i = 0; i < numVertices_edgeList; i++) {
+//        for (int j = 0; j < numVertices_edgeList; j++) {
+//            // Calculate the element-wise product and store it in the result matrix
+//            result[i * numVertices_edgeList + j] = mat[i * numVertices_edgeList + j] * product[i * numVertices_edgeList + j];
+//        }
+//    }
+
+
+    delete[] mat;
+    delete[] product;
+
+
+    // summing up the matrix
+
+
+    // Allocate device memory for result and sum
+    int* d_sum;
+
+    cudaMalloc((void**)&d_result, size);
+    cudaMalloc((void**)&d_sum, sizeof(int));
+
+    // Copy data from host to device
+    cudaMemcpy(d_result, result, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_sum, &sum, sizeof(int), cudaMemcpyHostToDevice);
+
+    // Define grid and block dimensions for the CUDA kernel
+    dim3 dimGrid3((numVertices_edgeList + 15) / 16, (numVertices_edgeList + 15) / 16);
+    dim3 dimBlock3(16, 16);
+
+    // Launch the CUDA kernel to compute the sum
+    sumResultMatrix<<<dimGrid3, dimBlock3>>>(d_result, d_sum, numVertices_edgeList);
+
+    // Copy the sum back from device to host
+    cudaMemcpy(&sum, d_sum, sizeof(int), cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(d_result);
+    cudaFree(d_sum);
+
+//    for (int i = 0; i < numVertices_edgeList; i++) {
+//        for (int j = 0; j < numVertices_edgeList; j++) {
+//            sum += result[i * numVertices_edgeList + j];
+//        }
+//    }
+    delete[] result;
+
+    std::cout << sum << std::endl;
+
     return 0;
-    // TODO: TEST FOR ADJACENCY MATRIX ENDS IN LINE ABOVE
-    CSCMatrix main_CSC;
 
-    edgeListToCSC(edgeList, numVertices_edgeList, main_CSC);
-
-    CSCMatrix upperCSC;
-    CSCMatrix lowerCSC;
-
-    CSCToUpperAndLower(main_CSC, upperCSC, lowerCSC);
-
-    // summing rows of upper CSC
-    const int number_of_vertices = upperCSC.colPtr.size() - 1;
-    int* uRowSum = new int[number_of_vertices];
-    countEdgesInRowsCUDA(upperCSC, number_of_vertices, uRowSum);
-
-    int* uNonZero = new int[number_of_vertices];
-    // NzIndices for uRowSum
-    NonZeroIndices(number_of_vertices, uRowSum, uNonZero);
-
-    return 0;
 }
