@@ -4,6 +4,11 @@ import sys
 import numpy as np
 
 
+
+
+
+
+
 def adjacency_matrix_converter(path_to_file):
     if os.path.isfile(path_to_file):
         # reading undirected graph file

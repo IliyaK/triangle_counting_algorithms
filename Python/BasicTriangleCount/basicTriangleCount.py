@@ -48,7 +48,7 @@ def basic_triangle_count(matrix_a):
     n, m = matrix_a.shape
     # making diagonal masks to split matrix into upper and lower section
     matrix_L_mask = np.tril(np.ones((n,m), dtype=bool), k=-1)
-    matrix_U_mask = np.tril(np.ones((n,m), dtype=bool), k=1)
+    matrix_U_mask = ~np.tril(np.ones((n,m), dtype=bool), k=0)
     # splitting input matrix into upper and lower sections
     matrix_L = np.where(matrix_L_mask, matrix_a, 0).astype(np.int32)
     matrix_U = np.where(matrix_U_mask, matrix_a, 0).astype(np.int32)
@@ -221,14 +221,54 @@ def basic_triangle_count(matrix_a):
     return count
 
 
+def basic_triangle_count_cpu(matrix_a):
+    n, m = matrix_a.shape
+    # making diagonal masks to split matrix into upper and lower section
+    matrix_L_mask = np.tril(np.ones((n,m), dtype=bool), k=-1)
+    matrix_U_mask = ~np.tril(np.ones((n,m), dtype=bool), k=0)
+    # splitting input matrix into upper and lower sections
+    matrix_L = np.where(matrix_L_mask, matrix_a, 0).astype(np.int32)
+    matrix_U = np.where(matrix_U_mask, matrix_a, 0).astype(np.int32)
+    del matrix_L_mask, matrix_U_mask, n, m
+
+    # Find indices of rows with non-zero sums
+    nonzero_rows = np.nonzero(np.sum(matrix_U, axis=1))[0]
+
+    # Create a new array of zeros with the same shape as matrix_U
+    arr_zeros_rows = np.zeros(matrix_U.shape)
+    arr_zeros_cols = np.zeros(matrix_U.shape)
+
+    # Fill arr_zeros with non-zero sum rows
+    arr_zeros_rows[nonzero_rows, :] = matrix_U[nonzero_rows, :]
+    arr_zeros_cols[:, nonzero_rows] = matrix_L[:, nonzero_rows]
+
+    B = arr_zeros_rows @ arr_zeros_cols
+    res = np.multiply(matrix_a, B)
+
+    count = np.sum(res)
+    return count
+
+
 
 if __name__ == '__main__':
-    # res = preprocessing("../../graphs/facebook_combined.txt")
-    res = preprocessing("../../graphs/CA-HepPh.txt")
+    res = preprocessing("../../graphs/facebook_combined.txt")
+    import time
+    times = []
     if type(res) == np.ndarray:
-        count = basic_triangle_count(res)
-        # print(f"count: {count}\t\treal count: 1612010\t\tdif.: {count-1612010}")
-        print(f"count: {count}\t\treal count: 3358499\t\tdif.: {count-3358499}")
+        for _ in range(100):
+            start_time = time.time()
+            count = basic_triangle_count_cpu(res)
+            print(f"count: {count/2}\t\treal count: 1612010\t\tdif.: {count/2-1612010}")
+            times.append(time.time() - start_time)
+        # print(f"count: {count}\t\treal count: 3358499\t\tdif.: {count-3358499}")
+        print(f"Mean of 100 Python CPU runs: {sum(times)/100}")
     else:
         print("Could not complete basic_triangle_count()", file=sys.stderr)
         exit(1)
+    """
+    NOTES
+    
+    python average GPU runtime 1.2777427291870118 sec
+    python average CPU runtime 1.1348547410964966 sec
+    
+    """
