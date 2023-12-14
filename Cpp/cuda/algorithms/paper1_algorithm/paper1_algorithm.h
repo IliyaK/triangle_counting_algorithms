@@ -1,5 +1,8 @@
 #ifndef CPP_PAPER1_ALGORITHM_H
 #define CPP_PAPER1_ALGORITHM_H
+#include "../../preprocessing.h"  // getting common processes
+#include <chrono>
+
 
 __global__ void copyUpperLower(int* mat, int* upper, int* lower, int numVertices_edgeList);
 __global__ void matrixMultiplication(int* product, int* upper, int* lower, int numVertices_edgeList);
