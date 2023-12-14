@@ -1,4 +1,5 @@
-#include "../../preprocessing.h"  // to get CSCMatrix struct
+#include "../../preprocessing.h"  // getting common processes
+#include <chrono>
 
 // CUDA
 __global__ void copyUpperLower(int* mat, int* upper, int* lower, int numVertices_edgeList) {
@@ -40,12 +41,10 @@ __global__ void sumResultMatrix(int* result, int* sum, int numVertices_edgeList)
 }
 ///////////////
 
-
-int algorithm1_gpu(const std::string& filename){
-    std::vector<std::pair<int, int>> edgeList = edgeLine_parser(filename);
-
+int algorithm1_gpu(const std::string& filename, std::vector<std::pair<int, int>>& edges){
+//    std::vector<std::pair<int, int>> edgeList = edgeLine_parser(filename);
+    std::vector<std::pair<int, int>> edgeList = edges;
     int numVertices_edgeList = getNumberOfVertices(edgeList);
-
 
     int sum = 0;
 
@@ -63,6 +62,8 @@ int algorithm1_gpu(const std::string& filename){
         mat[vertex2 * numVertices_edgeList + vertex1] = 1;
     }
     std::cout << "graph parsed" << std::endl;
+
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     int *upper = new int[arr_size]();
     int *lower = new int[arr_size]();
@@ -194,13 +195,16 @@ int algorithm1_gpu(const std::string& filename){
     cudaFree(d_sum);
 
     delete[] result;
-
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    long long elapsed_time = duration.count();
+    std::cout << "GPU time run (milliseconds): " << elapsed_time << std::endl;
     return sum;
 }
 
-int algorithm1_cpu(const std::string& filename){
-    std::vector<std::pair<int, int>> edgeList = edgeLine_parser(filename);
-
+int algorithm1_cpu(const std::string& filename, std::vector<std::pair<int, int>>& edges){
+//    std::vector<std::pair<int, int>> edgeList = edgeLine_parser(filename);
+    std::vector<std::pair<int, int>> edgeList = edges;
     int numVertices_edgeList = getNumberOfVertices(edgeList);
 
     int sum = 0;
@@ -212,8 +216,17 @@ int algorithm1_cpu(const std::string& filename){
     int *lower = new int[arr_size]();
     int *product = new int[arr_size]();
     int *result = new int[arr_size]();
+    // making adjacency matrix
+    for (const auto &edge : edgeList) {
+        int vertex1 = edge.first;
+        int vertex2 = edge.second;
 
+        // Set the elements to 1 to indicate the presence of an edge
+        mat[vertex1 * numVertices_edgeList + vertex2] = 1;
+        mat[vertex2 * numVertices_edgeList + vertex1] = 1;
+    }
 
+    auto start_time = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < numVertices_edgeList; i++) {
         for (int j = 0; j < numVertices_edgeList; j++) {
             if (i <= j) {
@@ -251,5 +264,9 @@ int algorithm1_cpu(const std::string& filename){
     delete[] product;
     delete[] mat;
 
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    long long elapsed_time = duration.count();
+    std::cout << "GPU time run (milliseconds): " << elapsed_time << std::endl;
     return sum;
 }
