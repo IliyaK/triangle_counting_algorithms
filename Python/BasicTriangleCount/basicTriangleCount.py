@@ -48,7 +48,7 @@ def basic_triangle_count(matrix_a):
     n, m = matrix_a.shape
     # making diagonal masks to split matrix into upper and lower section
     matrix_L_mask = np.tril(np.ones((n,m), dtype=bool), k=-1)
-    matrix_U_mask = np.tril(np.ones((n,m), dtype=bool), k=1)
+    matrix_U_mask = ~np.tril(np.ones((n,m), dtype=bool), k=0)
     # splitting input matrix into upper and lower sections
     matrix_L = np.where(matrix_L_mask, matrix_a, 0).astype(np.int32)
     matrix_U = np.where(matrix_U_mask, matrix_a, 0).astype(np.int32)
@@ -221,14 +221,91 @@ def basic_triangle_count(matrix_a):
     return count
 
 
+def basic_triangle_count_cpu(matrix_a):
+    n, m = matrix_a.shape
+    # making diagonal masks to split matrix into upper and lower section
+    matrix_L_mask = np.tril(np.ones((n,m), dtype=bool), k=-1)
+    matrix_U_mask = ~np.tril(np.ones((n,m), dtype=bool), k=0)
+    # splitting input matrix into upper and lower sections
+    matrix_L = np.where(matrix_L_mask, matrix_a, 0).astype(np.int32)
+    matrix_U = np.where(matrix_U_mask, matrix_a, 0).astype(np.int32)
+    del matrix_L_mask, matrix_U_mask, n, m
+
+    # Find indices of rows with non-zero sums
+    nonzero_rows = np.nonzero(np.sum(matrix_U, axis=1))[0]
+
+    # Create a new array of zeros with the same shape as matrix_U
+    arr_zeros_rows = np.zeros(matrix_U.shape)
+    arr_zeros_cols = np.zeros(matrix_U.shape)
+
+    # Fill arr_zeros with non-zero sum rows
+    arr_zeros_rows[nonzero_rows, :] = matrix_U[nonzero_rows, :]
+    arr_zeros_cols[:, nonzero_rows] = matrix_L[:, nonzero_rows]
+
+    B = arr_zeros_rows @ arr_zeros_cols
+    res = np.multiply(matrix_a, B)
+
+    count = np.sum(res)
+    return count
+
+
+def naive_cpu(adjacency_matrix):
+    triangle_count = 0
+
+    # Iterate through all possible triangles
+    for i in range(adjacency_matrix.shape[0]):
+        for j in range(i + 1, adjacency_matrix.shape[1]):
+            for k in range(j + 1, adjacency_matrix.shape[1]):
+                # Check if there is an edge between each pair of vertices in the triangle
+                if adjacency_matrix[i, j] and adjacency_matrix[j, k] and adjacency_matrix[k, i]:
+                    triangle_count += 1
+    return triangle_count
+
+
+def naive_gpu(adjacency_matrix):
+    size = adjacency_matrix.shape[0]
+
+    cuda_kernel = """
+__global__ void naive_gpu(int *adjacency_matrix, int *triangle_count, int size) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i < size && j < size && i < j) {
+        for (int k = j + 1; k < size; ++k) {
+            if (adjacency_matrix[i * size + j] && adjacency_matrix[j * size + k] && adjacency_matrix[k * size + i]) {
+                atomicAdd(triangle_count, 1);
+            }
+        }
+    }
+}
+"""
+    # Compile the CUDA kernel
+    mod = SourceModule(cuda_kernel)
+    count_triangles_kernel = mod.get_function("naive_gpu")
+
+    # Define block and grid dimensions
+    block_size = (16, 16, 1)
+    grid_size = ((size + block_size[0] - 1) // block_size[0], (size + block_size[1] - 1) // block_size[1])
+    res = np.zeros(1, dtype=np.int32)
+    count_triangles_kernel(drv.In(adjacency_matrix), drv.Out(res), np.int32(size),
+                           block=block_size, grid=grid_size)
+    return res[0]
+
 
 if __name__ == '__main__':
-    # res = preprocessing("../../graphs/facebook_combined.txt")
-    res = preprocessing("../../graphs/CA-HepPh.txt")
+    res = preprocessing("../../graphs/facebook_combined.txt")
+    import time
+    times = []
     if type(res) == np.ndarray:
-        count = basic_triangle_count(res)
-        # print(f"count: {count}\t\treal count: 1612010\t\tdif.: {count-1612010}")
-        print(f"count: {count}\t\treal count: 3358499\t\tdif.: {count-3358499}")
+        # res = np.array([
+        #     [0, 1, 1, 0, 0],
+        #     [1, 0, 1, 1, 0],
+        #     [1, 1, 0, 1, 1],
+        #     [0, 1, 1, 0, 1],
+        #     [0, 0, 1, 1, 0]
+        # ], dtype=np.int32)
+        print(naive_gpu(res))
+
     else:
         print("Could not complete basic_triangle_count()", file=sys.stderr)
         exit(1)
