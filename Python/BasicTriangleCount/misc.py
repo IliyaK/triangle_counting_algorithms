@@ -21,7 +21,7 @@ def adjacency_matrix_converter(path_to_file):
         vertices = np.unique(graph)
 
         # Create an empty adjacency matrix filled with zeros
-        adjacency_matrix = np.zeros((len(vertices), len(vertices)), dtype=np.ushort)
+        adjacency_matrix = np.zeros((len(vertices), len(vertices)), dtype=np.int32)
 
         # Populate the adjacency matrix based on the edges in the graph
         for u, v in graph:
