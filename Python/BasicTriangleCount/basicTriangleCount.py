@@ -248,27 +248,20 @@ def basic_triangle_count_cpu(matrix_a):
     count = np.sum(res)
     return count
 
-
-
 if __name__ == '__main__':
     res = preprocessing("../../graphs/facebook_combined.txt")
     import time
     times = []
     if type(res) == np.ndarray:
-        for _ in range(100):
-            start_time = time.time()
-            count = basic_triangle_count_cpu(res)
-            print(f"count: {count/2}\t\treal count: 1612010\t\tdif.: {count/2-1612010}")
-            times.append(time.time() - start_time)
-        # print(f"count: {count}\t\treal count: 3358499\t\tdif.: {count-3358499}")
-        print(f"Mean of 100 Python CPU runs: {sum(times)/100}")
+        res = np.array([
+            [0, 1, 1, 0, 0],
+            [1, 0, 1, 1, 0],
+            [1, 1, 0, 1, 1],
+            [0, 1, 1, 0, 1],
+            [0, 0, 1, 1, 0]
+        ])
+        print(basic_triangle_count_cpu(res)/2)
+
     else:
         print("Could not complete basic_triangle_count()", file=sys.stderr)
         exit(1)
-    """
-    NOTES
-    
-    python average GPU runtime 1.2777427291870118 sec
-    python average CPU runtime 1.1348547410964966 sec
-    
-    """
