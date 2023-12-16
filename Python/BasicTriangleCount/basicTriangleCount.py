@@ -1,7 +1,8 @@
 """
 Implementation of Basic Triangle Count algorithm from A. Azad, A. Buluc ̧, and J. Gilbert, “Parallel triangle counting and enumeration using matrix algebra,” in 2015
 IEEE International Parallel and Distributed Processing Symposium Workshop, pp. 804–811, IEEE, 2015.
-This is a tester linear implementation, full GPU implementation will be done in C++ and CUDA
+
+Implementation of Naive Triangle Counting Algorithm
 
 @author: Iliya Kulbaka
 @date: Sept. 23, 2023
@@ -12,7 +13,7 @@ import numpy as np
 import pycuda.autoinit
 import pycuda.driver as drv
 from pycuda.compiler import SourceModule
-
+import time
 from misc import adjacency_matrix_converter
 
 
@@ -215,7 +216,7 @@ def basic_triangle_count(matrix_a):
     grid_dim = (matrix_a.shape[0] // block_dim[0] + 1, matrix_a.shape[0] // block_dim[1] + 1, 1)
     row_sum_kernel(matrix_gpu, row_sums_gpu, np.int32(n), block=block_dim, grid=grid_dim)
     drv.memcpy_dtoh(row_sums, row_sums_gpu)
-    count = sum(row_sums)
+    count = sum(row_sums)/2
     ####### pyCuda end
 
     return count
@@ -249,63 +250,12 @@ def basic_triangle_count_cpu(matrix_a):
     return count
 
 
-def naive_cpu(adjacency_matrix):
-    triangle_count = 0
-
-    # Iterate through all possible triangles
-    for i in range(adjacency_matrix.shape[0]):
-        for j in range(i + 1, adjacency_matrix.shape[1]):
-            for k in range(j + 1, adjacency_matrix.shape[1]):
-                # Check if there is an edge between each pair of vertices in the triangle
-                if adjacency_matrix[i, j] and adjacency_matrix[j, k] and adjacency_matrix[k, i]:
-                    triangle_count += 1
-    return triangle_count
-
-
-def naive_gpu(adjacency_matrix):
-    size = adjacency_matrix.shape[0]
-
-    cuda_kernel = """
-__global__ void naive_gpu(int *adjacency_matrix, int *triangle_count, int size) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (i < size && j < size && i < j) {
-        for (int k = j + 1; k < size; ++k) {
-            if (adjacency_matrix[i * size + j] && adjacency_matrix[j * size + k] && adjacency_matrix[k * size + i]) {
-                atomicAdd(triangle_count, 1);
-            }
-        }
-    }
-}
-"""
-    # Compile the CUDA kernel
-    mod = SourceModule(cuda_kernel)
-    count_triangles_kernel = mod.get_function("naive_gpu")
-
-    # Define block and grid dimensions
-    block_size = (16, 16, 1)
-    grid_size = ((size + block_size[0] - 1) // block_size[0], (size + block_size[1] - 1) // block_size[1])
-    res = np.zeros(1, dtype=np.int32)
-    count_triangles_kernel(drv.In(adjacency_matrix), drv.Out(res), np.int32(size),
-                           block=block_size, grid=grid_size)
-    return res[0]
-
-
-if __name__ == '__main__':
-    res = preprocessing("../../graphs/facebook_combined.txt")
-    import time
-    times = []
-    if type(res) == np.ndarray:
-        # res = np.array([
-        #     [0, 1, 1, 0, 0],
-        #     [1, 0, 1, 1, 0],
-        #     [1, 1, 0, 1, 1],
-        #     [0, 1, 1, 0, 1],
-        #     [0, 0, 1, 1, 0]
-        # ], dtype=np.int32)
-        print(naive_gpu(res))
-
+def begin(mode, graph_file):
+    adjacency_matrix = preprocessing(graph_file)
+    start = time.time()
+    if mode == "CPU":
+        res = basic_triangle_count_cpu(adjacency_matrix)
     else:
-        print("Could not complete basic_triangle_count()", file=sys.stderr)
-        exit(1)
+        res = basic_triangle_count(adjacency_matrix)
+
+    print(f"Triangles counted: {res} (Runtime: {time.time()-start}) seconds")
