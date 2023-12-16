@@ -5,3 +5,5 @@ Along with having proper installation of CUDA, make sure nvcc folder is in the P
 -DCMAKE_CUDA_COMPILER="/path/to/cuda/bin/nvcc"
 
 This project requires a minimum CMake version of 3.21
+
+To select which algorithm to use in file cuda/main.cu uncomment one of the following lines: 31,33,35,37

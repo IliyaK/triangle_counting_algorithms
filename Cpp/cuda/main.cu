@@ -26,10 +26,14 @@ int main() {
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    for(int i = 0; i < 1000; i++){
+    for(int i = 0; i < 1; i++){
+        // Matrix Multiplication GPU
 //        sum = static_cast<double>(algorithm1_gpu("../graphs/facebook_combined.txt", edgeList));
+        // Matrix Multiplication CPU
 //        sum = static_cast<double>(algorithm1_cpu("../graphs/facebook_combined.txt", edgeList));
+        // Naive CPU
 //        sum = static_cast<double>(naive_cpu(mat, numVertices_edgeList));
+        // Naive GPU
         sum = static_cast<double>(naive_gpu(mat, numVertices_edgeList));
     }
 
